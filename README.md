@@ -87,6 +87,25 @@ you are replacing.
 > on Linux (below). Expect the first run of each toolchain, 5.6 and 7.0 especially,
 > to need small fixes.
 
+### Comparing a build with the official one
+
+`compare.ps1` checks a build from `build.ps1` against php.net's official build of the
+same release, with php.net's own test pack:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.3 -TargetedOnly   # about a minute
+powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.3                 # full test pack, hours
+powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.4 -Jobs 8 -Flavor NTS
+```
+
+It downloads the official zip and test pack, enables in both builds the extensions that
+load cleanly in both (the same `php.ini` for each), runs the targeted tests (the official
+build fails the 3 that check the fix, the patched one must pass all 5), then the test pack
+against each build. The report, `C:\php-sdk\compare\<version>-<flavor>\report.txt`, lists
+the tests failing on one side only. Expect exactly the 9 tests the fix changes (the 8
+`ext/session/tests/rfc1867*` tests and `tests/lang/bug45392.phpt`); anything else is worth
+a look at its `.diff`. `-TestDirs Zend,tests,ext\standard` runs a subset.
+
 ### OpenSSL and other bundled libraries
 
 The official dependency sets are as old as these PHP versions:
@@ -139,6 +158,7 @@ Results when the patches were written (21 October 2026):
 
 ```
 build.ps1           Windows build for all versions
+compare.ps1         patched build vs official build, with the official test pack
 patches/<version>/  git format-patch series, applied in name order
 tests/              targeted .phpt tests for the fix
 validate/           Linux validation (Dockerfile, ci.sh, validate.sh, run-targeted.sh)

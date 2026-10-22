@@ -1,0 +1,6 @@
+# Keep patches and test fixtures byte-exact (LF) on Windows checkouts
+*.patch -text
+*.phpt -text
+*.sh text eol=lf
+validate/Dockerfile text eol=lf
+*.ps1 text eol=crlf

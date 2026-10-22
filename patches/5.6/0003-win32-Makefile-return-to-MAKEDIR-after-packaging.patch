@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Backport <backport@localhost>
+Date: Wed, 21 Oct 2026 22:14:20 -0400
+Subject: [PATCH 3/3] win32 Makefile: return to $(MAKEDIR) after packaging
+
+build-snap and build-devel go back with "cd ..\..", which only works when the build directory is one level deep or absolute. An in-tree x64 build uses x64\Release_TS, so nmake snap then failed to enter the pecl directory. Build tooling only; the built PHP is unchanged.
+---
+ win32/build/Makefile | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/win32/build/Makefile b/win32/build/Makefile
+index 87a3e81a55..2587e0e854 100644
+--- a/win32/build/Makefile
++++ b/win32/build/Makefile
+@@ -158,19 +158,19 @@ build-dist: $(BUILD_DIR)\deplister.exe
+ 	$(BUILD_DIR)\php.exe -d date.timezone=UTC -n -dphar.readonly=0 win32/build/mkdist.php "$(BUILD_DIR)" "$(PHP_BUILD)" "$(PHPDLL)" "$(SAPI_TARGETS)" "$(EXT_TARGETS) $(PHP_EXTRA_DIST_FILES)" "$(PECL_TARGETS) $(PECL_EXTRA_DIST_FILES)" "$(SNAPSHOT_TEMPLATE)"
+ 	cd $(BUILD_DIR)\php-$(PHP_VERSION_STRING)
+ 	-$(ZIP) -9 -q -r ..\php-$(PHP_VERSION_STRING)$(PHP_ZTS_ARCHIVE_POSTFIX)-Win32-$(PHP_COMPILER_SHORT)-$(PHP_ARCHITECTURE).zip .
+-	cd ..\..
++	cd $(MAKEDIR)
+ 	cd $(BUILD_DIR)\pecl-$(PHP_VERSION_STRING)
+ 	-$(ZIP) -9 -q -r ..\pecl-$(PHP_VERSION_STRING)$(PHP_ZTS_ARCHIVE_POSTFIX)-Win32-$(PHP_COMPILER_SHORT)-$(PHP_ARCHITECTURE).zip .
+-	cd ..\..
++	cd $(MAKEDIR)
+ 	cd $(BUILD_DIR)\php-test-pack-$(PHP_VERSION_STRING)
+ 	-$(ZIP) -9 -q -r ..\php-test-pack-$(PHP_VERSION_STRING).zip .
+-	cd ..\..
++	cd $(MAKEDIR)
+ 	cd $(BUILD_DIR)
+ 	-$(ZIP) -9 -q php-debug-pack-$(PHP_VERSION_STRING)$(PHP_ZTS_ARCHIVE_POSTFIX)-Win32-$(PHP_COMPILER_SHORT)-$(PHP_ARCHITECTURE).zip *.pdb
+ 	cd
+ 	cd
+ 	-$(ZIP) -9 -q -r php-devel-pack-$(PHP_VERSION_STRING)$(PHP_ZTS_ARCHIVE_POSTFIX)-Win32-$(PHP_COMPILER_SHORT)-$(PHP_ARCHITECTURE).zip $(BUILD_DIR_DEV_NAME)
+-	cd ..\..
++	cd $(MAKEDIR)
+ 
+ dist: all build-dist
+ snap: build-snap build-devel build-dist

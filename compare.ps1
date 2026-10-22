@@ -145,7 +145,8 @@ function Invoke-TestRun([string] $PhpDir, [string] $Runner, [string] $WorkDir, [
 # --- Preflight -------------------------------------------------------------
 
 if ($Root -match '\s') { throw "Root must not contain spaces: $Root" }
-$Version = Split-List $Version
+# From a PowerShell prompt, -Version 7.3,7.0 is an array of numbers and 7.0 arrives as "7".
+$Version = @(Split-List $Version | ForEach-Object { if ($_ -match '^\d+$') { "$_.0" } else { $_ } })
 $unknown = @($Version | Where-Object { -not $Releases.Contains($_) })
 if ($unknown) { throw "Unknown version(s): $($unknown -join ', '). Use 5.6, 7.0, 7.2, 7.3 or 7.4." }
 $TestDirs = Split-List $TestDirs

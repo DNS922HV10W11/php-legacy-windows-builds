@@ -94,6 +94,7 @@ same release, with php.net's own test pack:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.3 -TargetedOnly   # about a minute
+powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version all -TargetedOnly   # every version built so far
 powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.3                 # full test pack, hours
 powershell -ExecutionPolicy Bypass -File .\compare.ps1 -Version 7.4 -Jobs 8 -Flavor NTS
 ```

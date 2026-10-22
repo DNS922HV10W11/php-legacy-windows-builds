@@ -75,7 +75,9 @@ $DepsArchives = 'https://downloads.php.net/~windows/php-sdk/archives'
 $PhpRepo      = 'https://github.com/php/php-src.git'
 
 $Releases = [ordered]@{
-    '5.6' = @{ Tag = 'php-5.6.40'; Crt = 'vc11'; DepsArchive = 'deps-5.6-vc11-{0}_2018-12.7z' }
+    # 5.6 builds in the source tree: its Makefile links php5ts.dll without a response file,
+    # and the absolute paths of an object directory overflow nmake's command line.
+    '5.6' = @{ Tag = 'php-5.6.40'; Crt = 'vc11'; DepsArchive = 'deps-5.6-vc11-{0}_2018-12.7z'; InTree = $true }
     '7.0' = @{ Tag = 'php-7.0.33'; Crt = 'vc14'; DepsArchive = 'deps-7.0-vc14-{0}_2018-12.7z' }
     '7.2' = @{ Tag = 'php-7.2.34'; Crt = 'vc15'; DepsBranch = '7.2' }
     '7.3' = @{ Tag = 'php-7.3.33'; Crt = 'vc15'; DepsBranch = '7.3' }
@@ -203,8 +205,10 @@ foreach ($ver in $selected) {
         '--enable-debug-pack'              # .pdb files in a separate debug-pack zip
         '--enable-com-dotnet=shared'
         '--without-analyzer'
-        '--enable-object-out-dir=../obj/'  # keeps TS and NTS objects apart, outside the source tree
     ) + $ExtraConfigureArgs
+    if (-not $rel.InTree) {
+        $configureArgs += '--enable-object-out-dir=../obj/'  # outside the source tree, reset on every run
+    }
 
     $lines = @('@echo off', 'setlocal')
     if ($rel.Crt -eq 'vc11') {
@@ -259,7 +263,13 @@ foreach ($ver in $selected) {
     $ErrorActionPreference = 'Stop'
     if ($exitCode) { throw "PHP $ver build failed with exit code $exitCode. See $log." }
 
-    $zips = Get-ChildItem -Path (Join-Path $base 'obj') -Recurse -Filter *.zip | Where-Object { $_.LastWriteTime -ge $started }
+    # Packages are written to the build directories (x64\Release_TS, Release, ...) only:
+    # the source tree has .zip test fixtures of its own.
+    $outRoot = if ($rel.InTree) { $src } else { $obj }
+    $zips = @($outRoot, (Join-Path $outRoot 'x64')) | Where-Object { Test-Path $_ } |
+            ForEach-Object { Get-ChildItem -Path $_ -Directory -Filter 'Release*' } |
+            ForEach-Object { Get-ChildItem -Path $_.FullName -File -Filter *.zip } |
+            Where-Object { $_.LastWriteTime -ge $started }
     $zips | Copy-Item -Destination $dist -Force
     Write-Host "PHP $ver done:" -ForegroundColor Green
     $zips | ForEach-Object { Write-Host "  $(Join-Path $dist $_.Name)" }

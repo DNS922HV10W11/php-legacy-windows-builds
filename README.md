@@ -106,7 +106,9 @@ build fails the 3 that check the fix, the patched one must pass all 5), then the
 against each build. The report, `C:\php-sdk\compare\<version>-<flavor>\report.txt`, lists
 the tests failing on one side only. Expect exactly the 9 tests the fix changes (the 8
 `ext/session/tests/rfc1867*` tests and `tests/lang/bug45392.phpt`); anything else is worth
-a look at its `.diff`. `-TestDirs Zend,tests,ext\standard` runs a subset.
+a look at its `.diff`. `-TestDirs Zend,tests,ext\standard` runs a subset. A watchdog kills
+stuck PHP processes when no test finishes for 15 minutes (`-StallMinutes`): some server
+tests (e.g. `ext\openssl`) can otherwise block a run on Windows forever.
 
 ### OpenSSL and other bundled libraries
 

@@ -54,7 +54,13 @@ param(
     [int] $Jobs = 0,
 
     # Only run the targeted tests (about a minute).
-    [switch] $TargetedOnly
+    [switch] $TargetedOnly,
+
+    # Watchdog: when the test log hasn't changed for this many minutes, kill the PHP
+    # processes of the build under test except run-tests itself. Tests that start helper
+    # servers (ext/openssl, ext/sockets, ...) can leave processes behind on Windows that
+    # keep run-tests waiting forever, past its own per-test timeout.
+    [int] $StallMinutes = 15
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,12 +140,21 @@ function Invoke-TestRun([string] $PhpDir, [string] $Runner, [string] $WorkDir, [
     $env:NO_INTERACTION          = '1'
     $env:REPORT_EXIT_STATUS      = '0'
     $env:SKIP_ONLINE_TESTS       = '1'
-    Push-Location $WorkDir
-    try {
-        $cmd = "$($env:TEST_PHP_EXECUTABLE) $Runner -q --offline --set-timeout 300 $($Extra -join ' ') $($Targets -join ' ') > $Log"
-        Invoke-Cmd $cmd | Out-Null
-    } finally {
-        Pop-Location
+    $cmd = "$($env:TEST_PHP_EXECUTABLE) $Runner -q --offline --set-timeout 300 $($Extra -join ' ') $($Targets -join ' ') > $Log 2>&1"
+    $proc = Start-Process -FilePath cmd.exe -ArgumentList "/c $cmd" -WorkingDirectory $WorkDir -NoNewWindow -PassThru
+
+    $limit = [TimeSpan]::FromMinutes($StallMinutes)
+    $lastKill = [DateTime]::MinValue
+    while (-not $proc.WaitForExit(30000)) {
+        $lastWrite = if (Test-Path $Log) { (Get-Item $Log).LastWriteTime } else { $proc.StartTime }
+        if (((Get-Date) - $lastWrite) -lt $limit -or ((Get-Date) - $lastKill) -lt $limit) { continue }
+        # Hung test: kill this build's PHP processes, but not run-tests itself.
+        $stuck = @(Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='php-cgi.exe'" |
+                   Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PhpDir, [StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -notmatch 'run-tests?\.php' })
+        $current = (Get-Content $Log -Tail 1 -ErrorAction SilentlyContinue)
+        Write-Warning ("No test output for {0} minutes; killing {1} stuck PHP process(es). Last test: {2}" -f $StallMinutes, $stuck.Count, $current)
+        $stuck | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        $lastKill = Get-Date
     }
 }
 

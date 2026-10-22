@@ -27,6 +27,15 @@ applications running while they are migrated, not a supported PHP.
 upstream and which the fix relies on), and, for 7.x, the `ZSTR_MAX_LEN` macro.
 Each patch's commit message lists its origin and every deviation from the 7.4 fix.
 
+Cross-checked against the independent backports in deb.sury.org's packages (21-22
+October 2026): the 7.3 (`7.3.33-35`), 7.2 (`7.2.34-66`) and 7.0 (`7.0.33-92`) fixes change
+exactly the same code lines, including the generated `zend_vm_execute.h`; the only
+difference is an equivalent `(unsigned char)` cast in `rfc1867.c`. The 5.6 fix
+(`5.6.40-105`) follows the same design; ours adds the VS2012 handling and took over his
+reset of `SG(callback_func)`. His 5.6 multipart limit lacks the second half of the
+upstream CVE-2023-0662 fix (empty file uploads counting against `max_file_uploads`),
+which ours has.
+
 ## Behaviour changes to know before deploying
 
 These come from the upstream fix itself and are the same on every version:

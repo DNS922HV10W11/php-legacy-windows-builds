@@ -131,7 +131,8 @@ foreach ($ver in $selected) {
     $src     = Join-Path $base 'src'
     $deps    = Join-Path $base 'deps'
     $log     = Join-Path $base 'build.log'
-    New-Item -ItemType Directory -Force -Path $base | Out-Null
+    # configure's --enable-object-out-dir=../obj/ refuses a directory that doesn't exist yet.
+    New-Item -ItemType Directory -Force -Path $base, (Join-Path $base 'obj') | Out-Null
 
     Write-Host ''
     Write-Host "===== PHP $ver ($($rel.Tag) + patches\$ver, $($rel.Crt) $Arch, $($Flavors -join '+')) =====" -ForegroundColor Cyan

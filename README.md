@@ -1,6 +1,7 @@
 # Legacy PHP Windows builds: CVE-2026-109618 / CVE-2026-109619
 
-Patches and scripts to build **PHP 5.6, 7.0, 7.2, 7.3 and 7.4 for Windows** with the
+Patches and scripts to build **PHP 5.6, 7.0, 7.2, 7.3 and 7.4 for Windows** (and fixed
+`.deb` packages of php7.2 and php7.4 for Ubuntu 18.04) with the
 fixes for the two critical remote code execution bugs announced on
 [21 October 2026](https://www.php.net/archive/2026.php#2026-10-21-5):
 
@@ -122,6 +123,50 @@ With Apache `mod_php`, the copy Apache loads first wins: update `Apache24\bin` t
 if it ships `*-1_1-x64.dll`. `php -i` then shows the new *OpenSSL Library Version*.
 5.6 and 7.0 would need a 1.0.2 build (1.0.2u was the last public one).
 
+## Ubuntu 18.04 packages
+
+For 18.04 machines without Ubuntu Pro, `ubuntu-18.04/` rebuilds fixed `.deb` packages in
+Docker, as drop-in upgrades of what those machines run:
+
+| Machines running | Rebuilt from | New version |
+|---|---|---|
+| stock Ubuntu php7.2 (`7.2.24-0ubuntu0.18.04.17`) | Ubuntu's own source + `ubuntu-18.04/php7.2-CVE-2026-109618_CVE-2026-109619.patch` | `7.2.24-0ubuntu0.18.04.17+cve2026.1` |
+| php7.4 from deb.sury.org (`1:7.4.33-5+ubuntu18.04.1+deb.sury.org+1` or similar) | deb.sury.org's `1:7.4.33-31`, which already has the fix, unchanged | `1:7.4.33-31+ubuntu18.04.1+cve2026.1` |
+| (dependency of the above) | deb.sury.org's `php-defaults` (`php-common`) | `2:101~+ubuntu18.04.1+cve2026.1` |
+
+```bash
+ubuntu-18.04/build.sh            # all three, ~1 hour; packages in ubuntu-18.04/out/<source>/
+ubuntu-18.04/test.sh php7.2      # ours vs stock Ubuntu
+ubuntu-18.04/test.sh php7.4      # ours vs deb.sury.org's build of the same source on 22.04
+```
+
+Ubuntu's source comes from the signed 18.04 archive; deb.sury.org's from its Launchpad
+PPA, with the `.dsc` signature and checksums verified. The 7.2 patch is the same fix as
+`patches/7.2`, adapted to Ubuntu's 7.2.24 tree (see its header): Ubuntu had already
+backported `max_multipart_body_parts` and `ZSTR_MAX_LEN`, and `zend_vm_execute.h` is
+regenerated, which also repairs Ubuntu's 2017 concat check that had landed in the wrong
+handlers.
+
+The versions sort above what is installed, and below a later official update (Ubuntu
+Pro's `+esm` builds, a deb.sury.org build of the same release), which then replaces them.
+To install, copy `out/php7.2` (or `out/php7.4`) to the machine and upgrade only the PHP
+packages already installed:
+
+```bash
+cd php7.2 && sudo apt install $(for p in $(dpkg-query -W -f '${Package}\n' 'php7.2*' 'libapache2-mod-php7.2' 'libphp7.2-embed' 2>/dev/null); do ls ./${p}_*.deb 2>/dev/null; done)
+```
+
+For php7.4 the same with `7.4`; add `../php-defaults/php-common_*.deb` only if `apt`
+asks for a newer `php-common`. Then restart PHP-FPM or Apache.
+
+Results (22 October 2026):
+
+- php7.2: passes the 5 targeted tests (stock Ubuntu fails 2; it already had the
+  multipart limit). PHP's test suites, 6,900 tests: the 9 expected failures more than
+  stock, nothing else.
+- php7.4: passes the 5 targeted tests and fails exactly the same suite tests as
+  deb.sury.org's own build of `-31` on 22.04 (29, environment related).
+
 ## Validation
 
 `validate/` builds each release tag with and without its patches on Linux
@@ -166,6 +211,7 @@ build.ps1           Windows build for all versions
 compare.ps1         patched build vs official build, with the official test pack
 patches/<version>/  git format-patch series, applied in name order
 tests/              targeted .phpt tests for the fix
+ubuntu-18.04/       .deb rebuilds for Ubuntu 18.04 (build.sh, test.sh, the 7.2 patch)
 validate/           Linux validation (Dockerfile, ci.sh, validate.sh, run-targeted.sh)
 ```
 

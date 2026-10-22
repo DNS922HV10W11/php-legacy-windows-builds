@@ -77,7 +77,10 @@ $PhpRepo      = 'https://github.com/php/php-src.git'
 $Releases = [ordered]@{
     # 5.6 builds in the source tree: its Makefile links php5ts.dll without a response file,
     # and the absolute paths of an object directory overflow nmake's command line.
-    '5.6' = @{ Tag = 'php-5.6.40'; Crt = 'vc11'; DepsArchive = 'deps-5.6-vc11-{0}_2018-12.7z'; InTree = $true }
+    # The snapshot build would also enable SAPIs and extensions php.net left out of its own
+    # 5.6 builds (ISAPI uses 32-bit inline assembly, MSSQL needs a library not in the deps).
+    '5.6' = @{ Tag = 'php-5.6.40'; Crt = 'vc11'; DepsArchive = 'deps-5.6-vc11-{0}_2018-12.7z'; InTree = $true
+               Configure = @('--disable-isapi', '--disable-nsapi', '--without-pi3web', '--without-mssql', '--without-pdo-mssql') }
     '7.0' = @{ Tag = 'php-7.0.33'; Crt = 'vc14'; DepsArchive = 'deps-7.0-vc14-{0}_2018-12.7z' }
     '7.2' = @{ Tag = 'php-7.2.34'; Crt = 'vc15'; DepsBranch = '7.2' }
     '7.3' = @{ Tag = 'php-7.3.33'; Crt = 'vc15'; DepsBranch = '7.3' }
@@ -205,7 +208,7 @@ foreach ($ver in $selected) {
         '--enable-debug-pack'              # .pdb files in a separate debug-pack zip
         '--enable-com-dotnet=shared'
         '--without-analyzer'
-    ) + $ExtraConfigureArgs
+    ) + @($rel.Configure | Where-Object { $_ }) + $ExtraConfigureArgs
     if (-not $rel.InTree) {
         $configureArgs += '--enable-object-out-dir=../obj/'  # outside the source tree, reset on every run
     }

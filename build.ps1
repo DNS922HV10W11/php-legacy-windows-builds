@@ -144,8 +144,13 @@ foreach ($ver in $selected) {
     $src     = Join-Path $base 'src'
     $deps    = Join-Path $base 'deps'
     $log     = Join-Path $base 'build.log'
-    # configure's --enable-object-out-dir=../obj/ refuses a directory that doesn't exist yet.
-    New-Item -ItemType Directory -Force -Path $base, (Join-Path $base 'obj') | Out-Null
+    # Start from an empty object directory: the source is reset below, which deletes files
+    # generated into it (win32\wsyslog.h), while their stamps here (wsyslog.rc) would
+    # survive and stop nmake from regenerating them. configure's
+    # --enable-object-out-dir=../obj/ also refuses a directory that doesn't exist yet.
+    $obj = Join-Path $base 'obj'
+    if (Test-Path $obj) { Remove-Item -LiteralPath $obj -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $base, $obj | Out-Null
 
     Write-Host ''
     Write-Host "===== PHP $ver ($($rel.Tag) + patches\$ver, $($rel.Crt) $Arch, $($Flavors -join '+')) =====" -ForegroundColor Cyan

@@ -29,7 +29,8 @@
 #>
 [CmdletBinding()]
 param(
-    # 5.6, 7.0, 7.2, 7.3 or 7.4; several as 7.3,7.2 (run one after the other).
+    # 5.6, 7.0, 7.2, 7.3, 7.4 or all; several as 7.3,7.2 (run one after the other).
+    # Versions without a patched zip in <Root>\dist yet are skipped with a warning.
     [Parameter(Mandatory)]
     [string[]] $Version,
 
@@ -147,9 +148,13 @@ function Invoke-TestRun([string] $PhpDir, [string] $Runner, [string] $WorkDir, [
 if ($Root -match '\s') { throw "Root must not contain spaces: $Root" }
 # From a PowerShell prompt, -Version 7.3,7.0 is an array of numbers and 7.0 arrives as "7".
 $Version = @(Split-List $Version | ForEach-Object { if ($_ -match '^\d+$') { "$_.0" } else { $_ } })
-$unknown = @($Version | Where-Object { -not $Releases.Contains($_) })
-if ($unknown) { throw "Unknown version(s): $($unknown -join ', '). Use 5.6, 7.0, 7.2, 7.3 or 7.4." }
+$unknown = @($Version | Where-Object { $_ -ne 'all' -and -not $Releases.Contains($_) })
+if ($unknown) { throw "Unknown version(s): $($unknown -join ', '). Use 5.6, 7.0, 7.2, 7.3, 7.4 or all." }
+if ($Version -contains 'all') { $Version = @($Releases.Keys) }
 $TestDirs = Split-List $TestDirs
+
+# One line per version, printed at the end and saved to <Root>\compare\summary-<flavor>.txt.
+$summaryRows = New-Object System.Collections.Generic.List[string]
 
 $dist = Join-Path $Root 'dist'
 $officialDir = Join-Path $Root 'official'
@@ -172,117 +177,141 @@ foreach ($ver in $Version) {
     $pattern = '^php-' + [regex]::Escape("$full$VersionSuffix$nts") + '-Win32-.+-' + $Arch + '\.zip$'
     $patchedZip = Get-ChildItem $dist -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $pattern } |
                   Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $patchedZip) { throw "No patched $Flavor zip for $ver in $dist (looked for $pattern). Run build.ps1 first." }
-
-    $officialZip = Join-Path $officialDir "php-$full$nts-Win32-$($rel.Crt)-$Arch.zip"
-    Get-File "$Official/$(Split-Path $officialZip -Leaf)" $officialZip
-    $testPack = Join-Path $officialDir "php-test-pack-$full.zip"
-    Get-File "$Official/$(Split-Path $testPack -Leaf)" $testPack
-
-    Write-Host "Unpacking $($patchedZip.Name) and $(Split-Path $officialZip -Leaf)"
-    $builds = [ordered]@{ official = (Join-Path $work 'official'); patched = (Join-Path $work 'patched') }
-    Expand-Fresh $officialZip $builds.official
-    Expand-Fresh $patchedZip.FullName $builds.patched
-
-    # Extensions that load cleanly in both builds.
-    $probe = Join-Path $work 'probe.php'
-    [IO.File]::WriteAllText($probe, '<?php echo "ok";')
-    function Test-Extension([string] $PhpDir, [string] $Dll, [string[]] $Preload) {
-        $ini = "-n -d extension_dir=$PhpDir\ext -d date.timezone=UTC"
-        foreach ($p in $Preload) { $ini += " -d extension=$p" }
-        (Invoke-Cmd "$PhpDir\php.exe $ini -d extension=$Dll $probe") -eq 'ok'
+    if (-not $patchedZip) {
+        Write-Warning "No patched $Flavor zip for $ver in $dist (looked for $pattern): skipped. Run build.ps1 first."
+        $summaryRows.Add(("{0,-4} no patched build in {1}" -f $ver, $dist))
+        continue
     }
-    $dlls = @(Get-ChildItem (Join-Path $builds.official 'ext') -Filter 'php_*.dll' | ForEach-Object { $_.Name }) |
-            Where-Object { Test-Path (Join-Path $builds.patched "ext\$_") } |
-            Where-Object { $_ -notin 'php_opcache.dll', 'php_phpdbg_webhelper.dll' } | Sort-Object
-    # exif needs mbstring loaded first.
-    $preload = @()
-    if ($dlls -contains 'php_mbstring.dll' -and (Test-Extension $builds.official 'php_mbstring.dll' @()) -and (Test-Extension $builds.patched 'php_mbstring.dll' @())) {
-        $preload = @('php_mbstring.dll')
-    }
-    $enabled = @($preload); $skipped = @()
-    foreach ($dll in $dlls | Where-Object { $_ -notin $preload }) {
-        if ((Test-Extension $builds.official $dll $preload) -and (Test-Extension $builds.patched $dll $preload)) { $enabled += $dll } else { $skipped += $dll }
-    }
-    foreach ($dir in $builds.Values) {
-        $ini = @("extension_dir = `"$dir\ext`"", 'date.timezone = UTC') + ($enabled | ForEach-Object { "extension=$_" })
-        [IO.File]::WriteAllLines((Join-Path $dir 'php.ini'), $ini)
-    }
+    $targeted = [ordered]@{}
+    $suite = 'not run (-TargetedOnly)'
 
-    Out-Report "PHP $ver $Flavor $Arch"
-    Out-Report "  official: $(Split-Path $officialZip -Leaf)"
-    Out-Report "  patched:  $($patchedZip.Name)"
-    Out-Report "  extensions enabled in both ($($enabled.Count)): $(($enabled | ForEach-Object { $_ -replace '^php_|\.dll$' }) -join ' ')"
-    if ($skipped) { Out-Report "  not loadable in both, left out: $(($skipped | ForEach-Object { $_ -replace '^php_|\.dll$' }) -join ' ')" }
-    foreach ($kind in $builds.Keys) {
-        Out-Report "  $kind php -v: $((Invoke-Cmd "$($builds[$kind])\php.exe -v") -split "`r?`n" | Select-Object -First 1)"
-    }
+    try {
+        $officialZip = Join-Path $officialDir "php-$full$nts-Win32-$($rel.Crt)-$Arch.zip"
+        Get-File "$Official/$(Split-Path $officialZip -Leaf)" $officialZip
+        $testPack = Join-Path $officialDir "php-test-pack-$full.zip"
+        Get-File "$Official/$(Split-Path $testPack -Leaf)" $testPack
 
-    # The official test pack, once per build: run-tests writes its results next to the tests.
-    $packs = [ordered]@{}
-    foreach ($kind in $builds.Keys) {
-        $packs[$kind] = Join-Path $work "tests-$kind"
-        Expand-Fresh $testPack $packs[$kind]
-    }
-    $runnerName = @('run-test.php', 'run-tests.php') | Where-Object { Test-Path (Join-Path $packs.official $_) } | Select-Object -First 1
-    if (-not $runnerName) { throw "No run-test.php in $testPack" }
+        Write-Host "Unpacking $($patchedZip.Name) and $(Split-Path $officialZip -Leaf)"
+        $builds = [ordered]@{ official = (Join-Path $work 'official'); patched = (Join-Path $work 'patched') }
+        Expand-Fresh $officialZip $builds.official
+        Expand-Fresh $patchedZip.FullName $builds.patched
 
-    # Targeted tests.
-    Out-Report ''
-    Out-Report 'Targeted tests (tests\*.phpt):'
-    foreach ($kind in $builds.Keys) {
-        $dir = Join-Path $work "targeted-$kind"
-        if (Test-Path $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        Copy-Item (Join-Path $PSScriptRoot 'tests\*.phpt') $dir
-        $log = Join-Path $work "targeted-$kind.log"
-        Invoke-TestRun $builds[$kind] (Join-Path $packs[$kind] $runnerName) $packs[$kind] @($dir) $log @()
-        $failed = @(Get-FailedTests $log $dir)
-        $total = @(Get-ChildItem $dir -Filter *.phpt).Count
-        Out-Report ("  {0,-8} {1} of {2} passed{3}" -f $kind, ($total - $failed.Count), $total, $(if ($failed) { '; failed: ' + ($failed -join ', ') } else { '' }))
-    }
-
-    if (-not $TargetedOnly) {
-        $targets = if ($TestDirs) { $TestDirs } else {
-            Get-ChildItem $packs.official -Directory | Where-Object { $_.Name -in 'Zend', 'tests', 'ext', 'sapi' } | ForEach-Object { $_.Name }
+        # Extensions that load cleanly in both builds.
+        $probe = Join-Path $work 'probe.php'
+        [IO.File]::WriteAllText($probe, '<?php echo "ok";')
+        function Test-Extension([string] $PhpDir, [string] $Dll, [string[]] $Preload) {
+            $ini = "-n -d extension_dir=$PhpDir\ext -d date.timezone=UTC"
+            foreach ($p in $Preload) { $ini += " -d extension=$p" }
+            (Invoke-Cmd "$PhpDir\php.exe $ini -d extension=$Dll $probe") -eq 'ok'
         }
-        $extra = @()
-        if ($Jobs -gt 0) {
-            if ($ver -eq '7.4') { $extra += "-j$Jobs" } else { Write-Warning "-Jobs needs 7.4's run-tests; $ver runs tests one at a time." }
+        $dlls = @(Get-ChildItem (Join-Path $builds.official 'ext') -Filter 'php_*.dll' | ForEach-Object { $_.Name }) |
+                Where-Object { Test-Path (Join-Path $builds.patched "ext\$_") } |
+                Where-Object { $_ -notin 'php_opcache.dll', 'php_phpdbg_webhelper.dll' } | Sort-Object
+        # exif needs mbstring loaded first.
+        $preload = @()
+        if ($dlls -contains 'php_mbstring.dll' -and (Test-Extension $builds.official 'php_mbstring.dll' @()) -and (Test-Extension $builds.patched 'php_mbstring.dll' @())) {
+            $preload = @('php_mbstring.dll')
         }
-        $failed = @{}
+        $enabled = @($preload); $skipped = @()
+        foreach ($dll in $dlls | Where-Object { $_ -notin $preload }) {
+            if ((Test-Extension $builds.official $dll $preload) -and (Test-Extension $builds.patched $dll $preload)) { $enabled += $dll } else { $skipped += $dll }
+        }
+        foreach ($dir in $builds.Values) {
+            $ini = @("extension_dir = `"$dir\ext`"", 'date.timezone = UTC') + ($enabled | ForEach-Object { "extension=$_" })
+            [IO.File]::WriteAllLines((Join-Path $dir 'php.ini'), $ini)
+        }
+
+        Out-Report "PHP $ver $Flavor $Arch"
+        Out-Report "  official: $(Split-Path $officialZip -Leaf)"
+        Out-Report "  patched:  $($patchedZip.Name)"
+        Out-Report "  extensions enabled in both ($($enabled.Count)): $(($enabled | ForEach-Object { $_ -replace '^php_|\.dll$' }) -join ' ')"
+        if ($skipped) { Out-Report "  not loadable in both, left out: $(($skipped | ForEach-Object { $_ -replace '^php_|\.dll$' }) -join ' ')" }
         foreach ($kind in $builds.Keys) {
-            $log = Join-Path $work "suite-$kind.log"
-            Write-Host "Running the test pack against the $kind build ($($targets -join ', ')); log: $log"
-            $started = Get-Date
-            Invoke-TestRun $builds[$kind] $runnerName $packs[$kind] $targets $log $extra
-            $failed[$kind] = @(Get-FailedTests $log $packs[$kind])
-            Write-Host ("  {0}: {1} failed tests, {2:N0} minutes" -f $kind, $failed[$kind].Count, ((Get-Date) - $started).TotalMinutes)
+            Out-Report "  $kind php -v: $((Invoke-Cmd "$($builds[$kind])\php.exe -v") -split "`r?`n" | Select-Object -First 1)"
         }
 
-        $onlyPatched  = @($failed.patched | Where-Object { $_ -notin $failed.official } | Sort-Object)
-        $onlyOfficial = @($failed.official | Where-Object { $_ -notin $failed.patched } | Sort-Object)
-        $expected     = @($onlyPatched | Where-Object { $_ -in $ExpectedChanges })
-        $unexpected   = @($onlyPatched | Where-Object { $_ -notin $ExpectedChanges })
-
-        Out-Report ''
-        Out-Report "Test pack ($($targets -join ', ')):"
+        # The official test pack, once per build: run-tests writes its results next to the tests.
+        $packs = [ordered]@{}
         foreach ($kind in $builds.Keys) {
-            $summary = (Select-String -Path (Join-Path $work "suite-$kind.log") -Pattern '^Tests (passed|failed|skipped) ' | ForEach-Object { ($_.Line -replace '\s+', ' ').Trim() }) -join '; '
-            Out-Report "  $kind`: $summary"
+            $packs[$kind] = Join-Path $work "tests-$kind"
+            Expand-Fresh $testPack $packs[$kind]
         }
-        Out-Report "  failing in both builds: $(@($failed.patched | Where-Object { $_ -in $failed.official }).Count) (not a difference)"
-        Out-Report ''
-        Out-Report "Failing only with the patches, expected ($($expected.Count) of $($ExpectedChanges.Count)):"
-        $expected | ForEach-Object { Out-Report "  $_" }
-        Out-Report ''
-        Out-Report "Failing only with the patches, NOT expected ($($unexpected.Count)) - look at the .diff next to each test in $($packs.patched):"
-        $unexpected | ForEach-Object { Out-Report "  $_" }
-        Out-Report ''
-        Out-Report "Failing only on the official build ($($onlyOfficial.Count)):"
-        $onlyOfficial | ForEach-Object { Out-Report "  $_" }
-    }
+        $runnerName = @('run-test.php', 'run-tests.php') | Where-Object { Test-Path (Join-Path $packs.official $_) } | Select-Object -First 1
+        if (-not $runnerName) { throw "No run-test.php in $testPack" }
 
-    [IO.File]::WriteAllLines($report, $lines)
-    Write-Host "Report: $report" -ForegroundColor Green
+        # Targeted tests.
+        Out-Report ''
+        Out-Report 'Targeted tests (tests\*.phpt):'
+        foreach ($kind in $builds.Keys) {
+            $dir = Join-Path $work "targeted-$kind"
+            if (Test-Path $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item (Join-Path $PSScriptRoot 'tests\*.phpt') $dir
+            $log = Join-Path $work "targeted-$kind.log"
+            Invoke-TestRun $builds[$kind] (Join-Path $packs[$kind] $runnerName) $packs[$kind] @($dir) $log @()
+            $failed = @(Get-FailedTests $log $dir)
+            $total = @(Get-ChildItem $dir -Filter *.phpt).Count
+            Out-Report ("  {0,-8} {1} of {2} passed{3}" -f $kind, ($total - $failed.Count), $total, $(if ($failed) { '; failed: ' + ($failed -join ', ') } else { '' }))
+            $targeted[$kind] = "{0}/{1}" -f ($total - $failed.Count), $total
+        }
+
+        if (-not $TargetedOnly) {
+            $targets = if ($TestDirs) { $TestDirs } else {
+                Get-ChildItem $packs.official -Directory | Where-Object { $_.Name -in 'Zend', 'tests', 'ext', 'sapi' } | ForEach-Object { $_.Name }
+            }
+            $extra = @()
+            if ($Jobs -gt 0) {
+                if ($ver -eq '7.4') { $extra += "-j$Jobs" } else { Write-Warning "-Jobs needs 7.4's run-tests; $ver runs tests one at a time." }
+            }
+            $failed = @{}
+            foreach ($kind in $builds.Keys) {
+                $log = Join-Path $work "suite-$kind.log"
+                Write-Host "Running the test pack against the $kind build ($($targets -join ', ')); log: $log"
+                $started = Get-Date
+                Invoke-TestRun $builds[$kind] $runnerName $packs[$kind] $targets $log $extra
+                $failed[$kind] = @(Get-FailedTests $log $packs[$kind])
+                Write-Host ("  {0}: {1} failed tests, {2:N0} minutes" -f $kind, $failed[$kind].Count, ((Get-Date) - $started).TotalMinutes)
+            }
+
+            $onlyPatched  = @($failed.patched | Where-Object { $_ -notin $failed.official } | Sort-Object)
+            $onlyOfficial = @($failed.official | Where-Object { $_ -notin $failed.patched } | Sort-Object)
+            $expected     = @($onlyPatched | Where-Object { $_ -in $ExpectedChanges })
+            $unexpected   = @($onlyPatched | Where-Object { $_ -notin $ExpectedChanges })
+            $suite = "{0} of {1} expected changes, {2} unexpected, {3} failing only on official" -f $expected.Count, $ExpectedChanges.Count, $unexpected.Count, $onlyOfficial.Count
+
+            Out-Report ''
+            Out-Report "Test pack ($($targets -join ', ')):"
+            foreach ($kind in $builds.Keys) {
+                $summary = (Select-String -Path (Join-Path $work "suite-$kind.log") -Pattern '^Tests (passed|failed|skipped) ' | ForEach-Object { ($_.Line -replace '\s+', ' ').Trim() }) -join '; '
+                Out-Report "  $kind`: $summary"
+            }
+            Out-Report "  failing in both builds: $(@($failed.patched | Where-Object { $_ -in $failed.official }).Count) (not a difference)"
+            Out-Report ''
+            Out-Report "Failing only with the patches, expected ($($expected.Count) of $($ExpectedChanges.Count)):"
+            $expected | ForEach-Object { Out-Report "  $_" }
+            Out-Report ''
+            Out-Report "Failing only with the patches, NOT expected ($($unexpected.Count)) - look at the .diff next to each test in $($packs.patched):"
+            $unexpected | ForEach-Object { Out-Report "  $_" }
+            Out-Report ''
+            Out-Report "Failing only on the official build ($($onlyOfficial.Count)):"
+            $onlyOfficial | ForEach-Object { Out-Report "  $_" }
+        }
+
+        [IO.File]::WriteAllLines($report, $lines)
+        Write-Host "Report: $report" -ForegroundColor Green
+        $summaryRows.Add(("{0,-4} targeted: official {1}, patched {2}; test pack: {3}" -f $ver, $targeted.official, $targeted.patched, $suite))
+    } catch {
+        Write-Warning "PHP ${ver}: $($_.Exception.Message)"
+        $summaryRows.Add(("{0,-4} error: {1}" -f $ver, $_.Exception.Message))
+        continue
+    }
 }
+
+Write-Host ''
+Write-Host "===== Summary ($Flavor $Arch) =====" -ForegroundColor Cyan
+$summaryRows | ForEach-Object { Write-Host $_ }
+$summaryFile = Join-Path $Root "compare\summary-$Flavor.txt"
+New-Item -ItemType Directory -Force -Path (Split-Path $summaryFile) | Out-Null
+[IO.File]::WriteAllLines($summaryFile, $summaryRows)
+Write-Host "Expected: targeted official 2/5 and patched 5/5; test pack 9 of 9 expected changes, 0 unexpected."
+Write-Host "Summary: $summaryFile"

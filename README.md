@@ -134,12 +134,14 @@ Docker, as drop-in upgrades of what those machines run:
 |---|---|---|
 | stock Ubuntu php7.2 (`7.2.24-0ubuntu0.18.04.17`) | Ubuntu's own source + `ubuntu-18.04/php7.2-CVE-2026-109618_CVE-2026-109619.patch` | `7.2.24-0ubuntu0.18.04.17+cve2026.1` |
 | php7.4 from deb.sury.org (`1:7.4.33-5+ubuntu18.04.1+deb.sury.org+1` or similar) | deb.sury.org's `1:7.4.33-31`, which already has the fix, unchanged | `1:7.4.33-31+ubuntu18.04.1+cve2026.1` |
+| php8.2 from deb.sury.org (`8.2.6-1+ubuntu18.04.1+deb.sury.org+1` or similar) | deb.sury.org's `8.2.35-1`: upstream 8.2.35, with the complete fix, unchanged | `8.2.35-1+ubuntu18.04.1+cve2026.1` |
 | (dependency of the above) | deb.sury.org's `php-defaults` (`php-common`) | `2:101~+ubuntu18.04.1+cve2026.1` |
 
 ```bash
-ubuntu-18.04/build.sh            # all three, ~1 hour; packages in ubuntu-18.04/out/<source>/
+ubuntu-18.04/build.sh            # all four, ~1.5 hours; packages in ubuntu-18.04/out/<source>/
 ubuntu-18.04/test.sh php7.2      # ours vs stock Ubuntu
 ubuntu-18.04/test.sh php7.4      # ours vs deb.sury.org's build of the same source on 22.04
+ubuntu-18.04/test.sh php8.2      # likewise
 ```
 
 Ubuntu's source comes from the signed 18.04 archive; deb.sury.org's from its Launchpad
@@ -158,8 +160,20 @@ packages already installed:
 cd php7.2 && sudo apt install $(for p in $(dpkg-query -W -f '${Package}\n' 'php7.2*' 'libapache2-mod-php7.2' 'libphp7.2-embed' 2>/dev/null); do ls ./${p}_*.deb 2>/dev/null; done)
 ```
 
-For php7.4 the same with `7.4`; add `../php-defaults/php-common_*.deb` only if `apt`
-asks for a newer `php-common`. Then restart PHP-FPM or Apache.
+For php7.4 and php8.2 the same with `7.4` or `8.2`; add `../php-defaults/php-common_*.deb`
+only if `apt` asks for a newer `php-common`. Then restart PHP-FPM or Apache.
+
+A machine with only `php8.2-common` and `php8.2-xml` (pulled in by deb.sury.org's `php-xml`
+metapackage) has no PHP 8.2 that can run, so nothing exposed; upgrading them is harmless.
+
+**APCu and the 5.6-7.4 fix:** `apcu_entry()` runs its callback, and `apcu_cache_info()`
+builds its result, while holding APCu's lock in shared memory. If either hits
+`memory_limit`, the process now exits with the lock held and the other Apache/FPM
+processes block on their next APCu call; only a full restart (not a graceful reload)
+clears it. Plain `apcu_fetch()` / `apcu_store()` are not affected. This comes with the
+minimal mitigation itself (also in the Debian and Ubuntu 7.x packages), not with 8.2.35's
+complete fix. APCu 5.1.22 itself was checked against the rebuilt php7.4: its own test
+suite passes (58/58).
 
 Results (22 October 2026):
 
@@ -168,6 +182,11 @@ Results (22 October 2026):
   stock, nothing else.
 - php7.4: passes the 5 targeted tests and fails exactly the same suite tests as
   deb.sury.org's own build of `-31` on 22.04 (29, environment related).
+- php8.2: the same targeted and suite results as deb.sury.org's own build of `8.2.35-1`
+  on 22.04 (8,165 passed, the same 12 failures). 8.2.35 has the complete upstream fix,
+  so 2 of the targeted tests, which describe the minimal 5.6-7.4 mitigation, fail on both
+  by design: memory exhaustion is handled gracefully (shutdown functions still run), and
+  session upload progress is fixed rather than disabled.
 
 ## Validation
 

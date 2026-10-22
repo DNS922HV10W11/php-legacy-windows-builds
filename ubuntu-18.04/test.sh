@@ -3,20 +3,21 @@
 # tests/ and PHP's own test suites (Zend, tests, ext/session, ext/standard), then list
 # the tests that fail on one side only.
 #   php7.2: ours vs stock Ubuntu 7.2.24-0ubuntu0.18.04.17, both on 18.04
-#   php7.4: ours on 18.04 vs deb.sury.org's php7.4 on Ubuntu 22.04 (same source)
+#   php7.4, php8.2: ours on 18.04 vs deb.sury.org's build on Ubuntu 22.04 (same source)
 #
-# usage: ubuntu-18.04/test.sh php7.2|php7.4        QUICK=1 for the targeted tests only
+# usage: ubuntu-18.04/test.sh php7.2|php7.4|php8.2   QUICK=1 for the targeted tests only
 # Expected: ours passes all targeted tests. php7.2 fails 9 suite tests more than stock
 # Ubuntu (8 ext/session/tests/rfc1867* and tests/lang/bug45392.phpt, see README);
-# php7.4 fails exactly the same tests as the reference.
+# php7.4 and php8.2 fail exactly the same tests as the reference. (8.2.35 has the complete
+# fix, so some targeted tests, written for the minimal 5.6-7.4 mitigation, may differ.)
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 proj=$(dirname "$here")
 hostpath() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
-pkg=${1:?usage: test.sh php7.2|php7.4}
+pkg=${1:?usage: test.sh php7.2|php7.4|php8.2}
 res=$here/out/test-$pkg
-mkdir -p "$res"
+mkdir -p "$res" && rm -f "${res:?}"/*   # no stale results from an earlier run
 
 case $pkg in
   php7.2) ver=7.2; upstream=7.2.24
@@ -24,11 +25,12 @@ case $pkg in
     ours_install="apt-get install -y -qq /debs/php7.2/php7.2-{common,cli,cgi,json,opcache,readline}_*.deb"
     ref_image=ubuntu:18.04
     ref_install="apt-get install -y -qq php7.2-cli php7.2-cgi" ;;
-  php7.4) ver=7.4; upstream=7.4.33
+  php7.4|php8.2) ver=${pkg#php}
+    if [ "$ver" = 7.4 ]; then upstream=7.4.33; extra=json; else upstream=8.2.35; extra=; fi
     ours_image=ubuntu:18.04
-    ours_install="apt-get install -y -qq /debs/php-defaults/php-common_*.deb /debs/php7.4/php7.4-{common,cli,cgi,json,opcache,readline}_*.deb"
+    ours_install="apt-get install -y -qq /debs/php-defaults/php-common_*.deb $(for p in common cli cgi opcache readline $extra; do printf '/debs/%s/%s-%s_*.deb ' "$pkg" "$pkg" "$p"; done)"
     ref_image=ubuntu:22.04
-    ref_install="apt-get install -y -qq software-properties-common gpg-agent > /dev/null && add-apt-repository -y ppa:ondrej/php > /dev/null && apt-get update -qq && apt-get install -y -qq php7.4-cli php7.4-cgi" ;;
+    ref_install="apt-get install -y -qq software-properties-common gpg-agent > /dev/null && add-apt-repository -y ppa:ondrej/php > /dev/null && apt-get update -qq && apt-get install -y -qq $pkg-cli $pkg-cgi" ;;
   *) echo "unknown package $pkg" >&2; exit 2 ;;
 esac
 [ -d "$here/out/$pkg" ] || { echo "No packages in ubuntu-18.04/out/$pkg: run build.sh $pkg first." >&2; exit 1; }
@@ -48,7 +50,17 @@ mkdir -p /tmp/t && cp /tests/*.phpt /tmp/t/
 export TEST_PHP_EXECUTABLE=/usr/bin/php$ver TEST_PHP_CGI_EXECUTABLE=/usr/bin/php-cgi$ver NO_INTERACTION=1 REPORT_EXIT_STATUS=0 SKIP_ONLINE_TESTS=1
 php$ver -v | head -1 > /res/$label.version
 php$ver $src/run-tests.php /tmp/t > /res/$label.targeted.log 2>&1
-tr '\r' '\n' < /res/$label.targeted.log | grep -oE '(PASS|FAIL|SKIP|BORK) .*\[[^]]*\.phpt\]' | sed -E 's/ \[[^]]*\]$//' | sort -u > /res/$label.targeted
+# PHP 8 doesn't print a line per passed test: read failures from the summary sections.
+for t in /tmp/t/*.phpt; do
+  name=$(sed -n '2p' "$t")
+  if sed -n '/^\(FAILED\|BORKED\) TEST SUMMARY/,/^=====/p' /res/$label.targeted.log | grep -qF "[$t]"; then
+    echo "FAIL $name"
+  elif grep -qE "^SKIP .*\[$t\]" /res/$label.targeted.log; then
+    echo "SKIP $name"
+  else
+    echo "PASS $name"
+  fi
+done | sort > /res/$label.targeted
 if [ "${QUICK:-0}" != 1 ]; then
   cd $src
   php$ver run-tests.php -q --offline --set-timeout 300 Zend tests ext/session ext/standard/tests > /res/$label.tests.log 2>&1

@@ -1,11 +1,12 @@
 #!/bin/bash
 # Build one PHP source tarball (Linux, minimal extensions) and test it.
-# usage: ci.sh <tarball in /tars> <label> [--debug]
+# usage: ci.sh <tarball in /tars> <label> [--debug] [--zts]
+# --zts builds thread-safe, like the Windows TS builds (catches missing TSRMLS_CC in 5.6).
 # Mounts: /tars (sources, read-only), /out (results), /tests (targeted .phpt, optional)
 # Set QUICK=1 to skip PHP's own test suites.
-# Results: /out/<label>.summary, .fails, .targeted, and the build logs.
+# Results: /out/<label>.summary, .fails, .targeted, .warnings, and the build logs.
 set -uo pipefail
-tar=$1; label=$2; dbg=${3:-}
+tar=$1; label=$2; shift 2
 out=/out/$label
 log() { echo "[$(date +%T)] $*" | tee -a $out.summary; }
 
@@ -13,7 +14,12 @@ log() { echo "[$(date +%T)] $*" | tee -a $out.summary; }
 mkdir -p /build/$label && cd /build/$label && tar -xf /tars/$tar || { log "EXTRACT FAILED"; exit 1; }
 
 cfg="--disable-all --enable-session --enable-cli --enable-cgi --disable-phpdbg --without-pear"
-[ "$dbg" = "--debug" ] && cfg="$cfg --enable-debug"
+for opt in "$@"; do
+  case $opt in
+    --debug) cfg="$cfg --enable-debug" ;;
+    --zts)   cfg="$cfg --enable-maintainer-zts" ;;
+  esac
+done
 
 log "buildconf"
 ./buildconf --force > $out.buildconf.log 2>&1 || { log "BUILDCONF FAILED"; exit 1; }
@@ -22,6 +28,12 @@ log "configure $cfg"
 log "make"
 make -j4 > $out.make.log 2>&1 || { log "MAKE FAILED"; tail -40 $out.make.log >> $out.summary; exit 1; }
 log "build ok: $(sapi/cli/php -v | head -1)"
+# Warnings in the files the backports touch: pointer/integer mix-ups here mean a
+# wrong argument list, which only crashes at run time.
+grep -E 'warning:' $out.make.log | grep -E '/(Zend|main|ext/session)/' | sort -u > $out.warnings
+if grep -qE 'makes (pointer from integer|integer from pointer)|-Wint-conversion' $out.warnings; then
+  log "WARNING: pointer/integer mix-ups in Zend, main or ext/session (see $label.warnings)"
+fi
 
 # The generated VM must match zend_vm_def.h: regenerate and compare.
 cp Zend/zend_vm_execute.h /tmp/vm_execute.orig

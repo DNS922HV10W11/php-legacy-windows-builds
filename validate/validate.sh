@@ -49,16 +49,20 @@ for v in $versions; do
     || { echo "patches for $v did not apply" >&2; exit 1; }
   tar -cf "$work/tars/patched-$v.tar" -C "$s-patched" --exclude=.git .
 
-  for kind in base patched; do
+  # base and patched: non-thread-safe builds with PHP's test suites (unless QUICK=1).
+  # zts: the patched tree built thread-safe, like the Windows TS builds, targeted tests only.
+  for kind in base patched zts; do
+    tarball=$kind-$v.tar; quick=${QUICK:-0}; opts=
+    if [ $kind = zts ]; then tarball=patched-$v.tar; quick=1; opts=--zts; fi
     docker rm -f "validate-$kind-$v" > /dev/null 2>&1 || true
-    MSYS_NO_PATHCONV=1 docker run -d --name "validate-$kind-$v" -e QUICK="${QUICK:-0}" \
+    MSYS_NO_PATHCONV=1 docker run -d --name "validate-$kind-$v" -e QUICK="$quick" \
       -v "$(hostpath "$work/tars"):/tars:ro" -v "$(hostpath "$work/out"):/out" -v "$(hostpath "$proj/tests"):/tests:ro" \
-      php-legacy-validate ci.sh "$kind-$v.tar" "$kind-$v" > /dev/null
+      php-legacy-validate ci.sh "$tarball" "$kind-$v" $opts > /dev/null
   done
-  echo "started $v (base and patched)"
+  echo "started $v (base, patched, patched thread-safe)"
 done
 
-for v in $versions; do docker wait "validate-base-$v" "validate-patched-$v" > /dev/null; done
+for v in $versions; do docker wait "validate-base-$v" "validate-patched-$v" "validate-zts-$v" > /dev/null; done
 
 echo
 for v in $versions; do
@@ -66,10 +70,11 @@ for v in $versions; do
   echo "===== PHP $v"
   grep -hE 'FAILED|DIFFERS|targeted|Tests' "$o/base-$v.summary" | sed 's/^/  base:    /'
   grep -hE 'FAILED|DIFFERS|targeted|Tests' "$o/patched-$v.summary" | sed 's/^/  patched: /'
-  grep -h '^FAIL' "$o/patched-$v.targeted" 2>/dev/null | sed 's/^/  patched targeted /' || true
+  grep -hE 'FAILED|DIFFERS|targeted|WARNING' "$o/zts-$v.summary" | sed 's/^/  zts:     /'
+  grep -h '^FAIL' "$o/patched-$v.targeted" "$o/zts-$v.targeted" 2>/dev/null | sed 's/^/  targeted /' || true
   if [ -f "$o/base-$v.fails" ] && [ -f "$o/patched-$v.fails" ]; then
     echo "  failing only with the patches:"
     comm -13 "$o/base-$v.fails" "$o/patched-$v.fails" | sed 's/^/    /'
   fi
-  docker rm "validate-base-$v" "validate-patched-$v" > /dev/null
+  docker rm "validate-base-$v" "validate-patched-$v" "validate-zts-$v" > /dev/null
 done

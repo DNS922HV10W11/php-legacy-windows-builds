@@ -141,6 +141,10 @@ Results when the patches were written (21 October 2026):
   same 9 tests more than its base tag, all expected:
   the 8 `ext/session/tests/rfc1867*` upload progress tests, and `tests/lang/bug45392.phpt`
   (output buffered before a memory limit error is no longer flushed).
+- Each patched version is also built thread-safe, as on Windows (`zts` in the output):
+  the targeted tests must pass there too, and integer/pointer argument mix-ups in the
+  compiler warnings are flagged. This caught a missing `TSRMLS_CC` in the 5.6 backport of
+  CVE-2023-0662 that only crashed thread-safe builds.
 - 5.6 and 7.2, the ports done here, were also run as debug builds (internal assertions
   and hash table consistency checks): no additional failures.
 - `tests/`: every base tag fails the 3 tests of the fix (memory limit exit, session

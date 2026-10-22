@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Backport <backport@localhost>
+Date: Wed, 21 Oct 2026 21:29:46 -0400
+Subject: [PATCH 4/4] mkdist.php: use [] for string offsets
+
+nmake snap runs mkdist.php with the PHP SDK's PHP 8, which no longer accepts the {} offset syntax (Fatal error at line 194). Build tooling only; the built PHP is unchanged.
+---
+ win32/build/mkdist.php | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/win32/build/mkdist.php b/win32/build/mkdist.php
+index 7a39bea02b..627ec9f4a4 100644
+--- a/win32/build/mkdist.php
++++ b/win32/build/mkdist.php
+@@ -191,11 +191,11 @@ function extract_file_from_tarball($pkg, $filename, $dest_dir) /* {{{ */
+ 			break;
+ 		$checksum = 0;
+ 		for ($i = 0; $i < 148; $i++)
+-			$checksum += ord($hdr_data{$i});
++			$checksum += ord($hdr_data[$i]);
+ 		for ($i = 148; $i < 156; $i++)
+ 			$checksum += 32;
+ 		for ($i = 156; $i < 512; $i++)
+-			$checksum += ord($hdr_data{$i});
++			$checksum += ord($hdr_data[$i]);
+ 
+ 		$hdr = unpack("a100filename/a8mode/a8uid/a8gid/a12size/a12mtime/a8checksum/a1typeflag/a100link/a6magic/a2version/a32uname/a32gname/a8devmajor/a8devminor", $hdr_data);
+ 

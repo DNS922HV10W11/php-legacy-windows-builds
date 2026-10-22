@@ -35,8 +35,9 @@
 #>
 [CmdletBinding()]
 param(
+    # 5.6, 7.0, 7.2, 7.3, 7.4 or all; several as 7.3,7.2 (validated below: powershell -File
+    # passes "7.3,7.2" as a single string, which ValidateSet would reject).
     [Parameter(Mandatory)]
-    [ValidateSet('5.6', '7.0', '7.2', '7.3', '7.4', 'all')]
     [string[]] $Version,
 
     # SDK, build trees and dist folder. Must not contain spaces.
@@ -45,15 +46,15 @@ param(
     [ValidateSet('x64', 'x86')]
     [string] $Arch = 'x64',
 
-    # TS = thread-safe (Apache mod_php); NTS = non-thread-safe (IIS/FastCGI, php-cgi).
-    [ValidateSet('TS', 'NTS')]
+    # TS = thread-safe (Apache mod_php); NTS = non-thread-safe (IIS/FastCGI, php-cgi). Both as TS,NTS.
     [string[]] $Flavors = @('TS', 'NTS'),
 
     # Appended to the release version: php -v shows e.g. 7.3.33-cve2026.
     [ValidatePattern('^[-.+~\w]*$')]
     [string] $VersionSuffix = '-cve2026',
 
-    # Appended to every configure call, e.g. '--without-enchant'.
+    # Appended to every configure call, e.g. '--without-enchant'. With powershell -File, pass
+    # several as one space-separated string: values such as 'C:\sdk,shared' contain commas.
     [string[]] $ExtraConfigureArgs = @(),
 
     # Build 7.0 with the VS2017 (VC15) compiler when the VC14 toolset is missing.
@@ -98,6 +99,18 @@ function Get-File([string] $Url, [string] $Path) {
 
 if ($Root -match '\s') { throw "Root must not contain spaces (the PHP SDK can't handle them): $Root" }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'git was not found on PATH.' }
+
+function Split-List([string[]] $Values) {
+    @($Values | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+}
+
+$Version = Split-List $Version
+$unknown = @($Version | Where-Object { $_ -ne 'all' -and -not $Releases.Contains($_) })
+if ($unknown) { throw "Unknown version(s): $($unknown -join ', '). Use 5.6, 7.0, 7.2, 7.3, 7.4 or all." }
+
+$Flavors = Split-List $Flavors | ForEach-Object { $_.ToUpperInvariant() }
+$unknown = @($Flavors | Where-Object { $_ -notin 'TS', 'NTS' })
+if ($unknown -or -not $Flavors) { throw "Unknown flavor(s): $($unknown -join ', '). Use TS, NTS or TS,NTS." }
 
 $selected = if ($Version -contains 'all') { @($Releases.Keys) } else { $Releases.Keys | Where-Object { $Version -contains $_ } }
 

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Backport <backport@localhost>
 Date: Wed, 21 Oct 2026 20:07:39 -0400
-Subject: [PATCH 2/3] Define ZSTR_MAX_LEN in Zend/zend_string.h
+Subject: [PATCH 2/4] Define ZSTR_MAX_LEN in Zend/zend_string.h
 
 Source: 0156-Define-ZSTR_MAX_LEN-Zend-zend_string.h.patch from Freexian ELTS php7.0 (prerequisite of the CVE-2026-109618/109619 backport).
 ---

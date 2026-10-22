@@ -17,9 +17,9 @@ applications running while they are migrated, not a supported PHP.
 |---|---|---|---|
 | 7.4 | `php-7.4.33` | 1 | The PHP security team's backport, [`712e60f`](https://github.com/php/php-src/commit/712e60f9edfd03f0960fc4fc3c2c375f42b90aa2), applied to the 7.4.33 tag |
 | 7.3 | `php-7.3.33` | 3 | Freexian ELTS backport (Debian `php7.3 7.3.31-1~deb10u16`), context adjusted for upstream 7.3.33 |
-| 7.2 | `php-7.2.34` | 3 | Ported here from the 7.4 fix, using the 7.3 and 7.0 ELTS backports as references |
+| 7.2 | `php-7.2.34` | 4 | Ported here from the 7.4 fix, using the 7.3 and 7.0 ELTS backports as references (patch 0004 only makes the packaging script run on the SDK's PHP 8) |
 | 7.0 | `php-7.0.33` | 3 | Freexian ELTS backport (Debian `php7.0 7.0.33-0+deb9u26`), context adjusted for upstream 7.0.33 |
-| 5.6 | `php-5.6.40` | 2 | Ported here from the 7.4 fix, following the 7.0 backport where the engines are alike |
+| 5.6 | `php-5.6.40` | 2 | Ported here from the 7.4 fix, following the 7.0 backport where the engines are alike; C89 for VS2012 |
 
 5.6 through 7.3 also get two prerequisites from the Freexian ELTS packages:
 `max_multipart_body_parts` (CVE-2023-0662, which these versions never received
